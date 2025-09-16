@@ -34,30 +34,44 @@ app.use(compression());
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  max: 100,
   message: 'Too many requests from this IP, please try again later.'
 });
 app.use(limiter);
 
 // CORS configuration
-app.use(cors({
-  origin: [
-    'http://localhost:8080',
-    'http://localhost:3000', 
-    'http://localhost:5173',
-    'http://localhost:4173',
-    'https://apparcus.com',
-    'https://www.apparcus.com',
-    'https://api.apparcus.com',
-    process.env.FRONTEND_URL,
-    process.env.PRODUCTION_FRONTEND_URL
-  ].filter(Boolean),
+const allowedOrigins = [
+  'http://localhost:8080',
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://localhost:4173',
+  'https://apparcus.com',
+  'https://www.apparcus.com',
+  'https://api.apparcus.com',
+  process.env.FRONTEND_URL,
+  process.env.PRODUCTION_FRONTEND_URL
+].filter(Boolean);
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like curl or mobile apps)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      return callback(new Error('CORS not allowed from this origin: ' + origin), false);
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-  preflightContinue: false,
   optionsSuccessStatus: 200
-}));
+};
+
+app.use(cors(corsOptions));
+
+// ✅ Handle preflight (OPTIONS) requests for all routes
+app.options('*', cors(corsOptions));
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -87,14 +101,13 @@ app.use('/api/upload', uploadRoutes);
 
 // Serve uploaded files statically with proper headers
 app.use('/uploads', (req, res, next) => {
-  // Allow images to be embedded from other origins/ports (dashboard runs on 5173/8080)
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
-  // Important for Chrome/Edge: permit cross-origin resource usage of images
   res.header('Cross-Origin-Resource-Policy', 'cross-origin');
   next();
 }, express.static(path.join(process.cwd(), 'uploads')));
+
 app.use('/api/email', emailRoutes);
 app.use('/api/banks', bankRoutes);
 app.use('/api/verify-account', bankRoutes);
@@ -119,6 +132,7 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Root welcome route
 app.get('/', (req, res) => {
   res.json({ message: 'Welcome to Apparcus API!' });
 });

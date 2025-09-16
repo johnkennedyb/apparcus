@@ -423,10 +423,28 @@ router.put('/payments/:reference/status', [
         payment.paymentStatus = 'completed';
         await payment.save();
 
-        await SupportRequest.findByIdAndUpdate(
+        const supportRequest = await SupportRequest.findByIdAndUpdate(
           payment.supportRequestId,
-          { $inc: { amountRaised: payment.amount } }
-        );
+          { $inc: { amountRaised: payment.amount } },
+          { new: true }
+        ).populate('projectId');
+
+        // Update associated project funding if linked to a project
+        if (supportRequest && supportRequest.projectId) {
+          const Project = (await import('../models/Project.js')).default;
+          const project = await Project.findById(supportRequest.projectId._id);
+          if (project) {
+            project.currentFunding = (project.currentFunding || 0) + payment.amount;
+            
+            // Check if project funding goal is reached
+            if (project.currentFunding >= project.fundingGoal) {
+              project.status = 'completed';
+            }
+            
+            await project.save();
+            console.log('Project funding updated via support payment verification:', project._id, 'New amount:', project.currentFunding);
+          }
+        }
 
         return res.json({ message: 'Payment verified and completed', payment });
       } catch (err) {

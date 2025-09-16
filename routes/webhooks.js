@@ -68,7 +68,8 @@ async function handleSuccessfulPayment(data) {
 
       // Update support request if applicable
       if (payment.supportRequestId) {
-        const supportRequest = await SupportRequest.findById(payment.supportRequestId);
+        const supportRequest = await SupportRequest.findById(payment.supportRequestId)
+          .populate('projectId');
         if (supportRequest) {
           supportRequest.amountRaised = (supportRequest.amountRaised || 0) + payment.amount;
           
@@ -79,6 +80,23 @@ async function handleSuccessfulPayment(data) {
           
           await supportRequest.save();
           console.log('Support request updated:', supportRequest._id);
+
+          // Update associated project funding if linked to a project
+          if (supportRequest.projectId) {
+            const Project = (await import('../models/Project.js')).default;
+            const project = await Project.findById(supportRequest.projectId._id);
+            if (project) {
+              project.currentFunding = (project.currentFunding || 0) + payment.amount;
+              
+              // Check if project funding goal is reached
+              if (project.currentFunding >= project.fundingGoal) {
+                project.status = 'completed';
+              }
+              
+              await project.save();
+              console.log('Project funding updated:', project._id, 'New amount:', project.currentFunding);
+            }
+          }
         }
       }
 

@@ -107,7 +107,145 @@ router.post('/initialize', [
   }
 });
 
-// Verify Paystack payment
+// Public payment verification (no auth required)
+router.get('/verify/public/:reference', async (req, res) => {
+  try {
+    const { reference } = req.params;
+    const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
+
+    if (!paystackSecretKey) {
+      return res.status(500).json({
+        status: false,
+        message: 'Payment service not configured',
+        error: 'Missing Paystack API key'
+      });
+    }
+
+    console.log('Verifying public payment:', reference);
+
+    // Verify with Paystack
+    const paystackResponse = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${paystackSecretKey}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const verificationData = await paystackResponse.json();
+
+    if (!paystackResponse.ok || !verificationData.status) {
+      console.error('Paystack verification failed (public):', verificationData);
+      return res.status(400).json({
+        status: false,
+        message: verificationData.message || 'Payment verification failed',
+        error: verificationData.message
+      });
+    }
+
+    const transaction = verificationData.data;
+    console.log('Payment verification successful (public):', transaction.reference);
+
+    // Update payment record in database
+    const supportPayment = await SupportPayment.findOne({ paystackReference: reference });
+    
+    if (supportPayment && supportPayment.paymentStatus !== 'completed') {
+      supportPayment.paymentStatus = transaction.status === 'success' ? 'completed' : 'failed';
+      await supportPayment.save();
+
+      // If payment is successful and for a support request, update the support request
+      if (transaction.status === 'success' && supportPayment.supportRequestId) {
+        const supportRequest = await SupportRequest.findById(supportPayment.supportRequestId)
+          .populate('projectId')
+          .populate('requesterId');
+        if (supportRequest) {
+          supportRequest.amountRaised = (supportRequest.amountRaised || 0) + supportPayment.amount;
+          await supportRequest.save();
+          console.log('Support request updated with payment (public):', supportRequest._id);
+
+          // Credit the support request owner's wallet
+          const Wallet = (await import('../models/Wallet.js')).default;
+          const Transaction = (await import('../models/Transaction.js')).default;
+          
+          // Get or create the wallet for the support request owner
+          let wallet = await Wallet.findOne({
+            userId: supportRequest.requesterId._id,
+            projectId: supportRequest.projectId ? supportRequest.projectId._id : null,
+            currency: 'NGN'
+          });
+
+          if (!wallet) {
+            wallet = new Wallet({
+              userId: supportRequest.requesterId._id,
+              projectId: supportRequest.projectId ? supportRequest.projectId._id : null,
+              currency: 'NGN',
+              balance: 0
+            });
+            await wallet.save();
+            console.log('Created new wallet for user (public):', supportRequest.requesterId._id);
+          }
+
+          // Credit the wallet
+          await wallet.credit(supportPayment.amount);
+          console.log('Wallet credited (public):', wallet._id, 'Amount:', supportPayment.amount, 'New balance:', wallet.balance);
+
+          // Create transaction record
+          const transactionRecord = new Transaction({
+            userId: supportRequest.requesterId._id,
+            type: 'credit',
+            amount: supportPayment.amount,
+            description: `Payment received for support request: ${supportRequest.title}`,
+            reference: `PAY_${reference}`,
+            paystackReference: reference,
+            status: 'completed',
+            projectId: supportRequest.projectId ? supportRequest.projectId._id : null
+          });
+          await transactionRecord.save();
+          console.log('Transaction record created (public):', transactionRecord._id);
+
+          // Update associated project funding if linked to a project
+          if (supportRequest.projectId) {
+            const Project = (await import('../models/Project.js')).default;
+            const project = await Project.findById(supportRequest.projectId._id);
+            if (project) {
+              project.currentFunding = (project.currentFunding || 0) + supportPayment.amount;
+              
+              if (project.currentFunding >= project.fundingGoal) {
+                project.status = 'completed';
+              }
+              
+              await project.save();
+              console.log('Project funding updated (public):', project._id, 'New amount:', project.currentFunding);
+            }
+          }
+        }
+      }
+    }
+
+    res.json({
+      status: true,
+      message: 'Payment verification successful',
+      data: {
+        reference: transaction.reference,
+        amount: transaction.amount,
+        status: transaction.status,
+        paid_at: transaction.paid_at,
+        customer: transaction.customer,
+        metadata: transaction.metadata
+      }
+    });
+
+  } catch (error) {
+    console.error('Public payment verification error:', error);
+    res.status(500).json({
+      status: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+// Verify Paystack payment (authenticated)
 router.get('/verify/:reference', authenticate, async (req, res) => {
   try {
     const { reference } = req.params;

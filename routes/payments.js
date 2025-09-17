@@ -156,11 +156,52 @@ router.get('/verify/:reference', authenticate, async (req, res) => {
       // If payment is successful and for a support request, update the support request
       if (transaction.status === 'success' && supportPayment.supportRequestId) {
         const supportRequest = await SupportRequest.findById(supportPayment.supportRequestId)
-          .populate('projectId');
+          .populate('projectId')
+          .populate('requesterId');
         if (supportRequest) {
           supportRequest.amountRaised = (supportRequest.amountRaised || 0) + supportPayment.amount;
           await supportRequest.save();
           console.log('Support request updated with payment:', supportRequest._id);
+
+          // Credit the support request owner's wallet
+          const Wallet = (await import('../models/Wallet.js')).default;
+          const Transaction = (await import('../models/Transaction.js')).default;
+          
+          // Get or create the wallet for the support request owner
+          let wallet = await Wallet.findOne({
+            userId: supportRequest.requesterId._id,
+            projectId: supportRequest.projectId ? supportRequest.projectId._id : null,
+            currency: 'NGN'
+          });
+
+          if (!wallet) {
+            wallet = new Wallet({
+              userId: supportRequest.requesterId._id,
+              projectId: supportRequest.projectId ? supportRequest.projectId._id : null,
+              currency: 'NGN',
+              balance: 0
+            });
+            await wallet.save();
+            console.log('Created new wallet for user:', supportRequest.requesterId._id);
+          }
+
+          // Credit the wallet
+          await wallet.credit(supportPayment.amount);
+          console.log('Wallet credited:', wallet._id, 'Amount:', supportPayment.amount, 'New balance:', wallet.balance);
+
+          // Create transaction record
+          const transactionRecord = new Transaction({
+            userId: supportRequest.requesterId._id,
+            type: 'credit',
+            amount: supportPayment.amount,
+            description: `Payment received for support request: ${supportRequest.title}`,
+            reference: `PAY_${reference}`,
+            paystackReference: reference,
+            status: 'completed',
+            projectId: supportRequest.projectId ? supportRequest.projectId._id : null
+          });
+          await transactionRecord.save();
+          console.log('Transaction record created:', transactionRecord._id);
 
           // Update associated project funding if linked to a project
           if (supportRequest.projectId) {
@@ -264,10 +305,51 @@ router.put('/:reference/status', [
     // If payment completed, update support request
     if (status === 'completed' && payment.supportRequestId) {
       const supportRequest = await SupportRequest.findById(payment.supportRequestId)
-        .populate('projectId');
+        .populate('projectId')
+        .populate('requesterId');
       if (supportRequest) {
         supportRequest.amountRaised = (supportRequest.amountRaised || 0) + payment.amount;
         await supportRequest.save();
+
+        // Credit the support request owner's wallet
+        const Wallet = (await import('../models/Wallet.js')).default;
+        const Transaction = (await import('../models/Transaction.js')).default;
+        
+        // Get or create the wallet for the support request owner
+        let wallet = await Wallet.findOne({
+          userId: supportRequest.requesterId._id,
+          projectId: supportRequest.projectId ? supportRequest.projectId._id : null,
+          currency: 'NGN'
+        });
+
+        if (!wallet) {
+          wallet = new Wallet({
+            userId: supportRequest.requesterId._id,
+            projectId: supportRequest.projectId ? supportRequest.projectId._id : null,
+            currency: 'NGN',
+            balance: 0
+          });
+          await wallet.save();
+          console.log('Created new wallet for user via status update:', supportRequest.requesterId._id);
+        }
+
+        // Credit the wallet
+        await wallet.credit(payment.amount);
+        console.log('Wallet credited via status update:', wallet._id, 'Amount:', payment.amount, 'New balance:', wallet.balance);
+
+        // Create transaction record
+        const transactionRecord = new Transaction({
+          userId: supportRequest.requesterId._id,
+          type: 'credit',
+          amount: payment.amount,
+          description: `Payment received for support request: ${supportRequest.title}`,
+          reference: `PAY_${payment.paystackReference}`,
+          paystackReference: payment.paystackReference,
+          status: 'completed',
+          projectId: supportRequest.projectId ? supportRequest.projectId._id : null
+        });
+        await transactionRecord.save();
+        console.log('Transaction record created via status update:', transactionRecord._id);
 
         // Update associated project funding if linked to a project
         if (supportRequest.projectId) {

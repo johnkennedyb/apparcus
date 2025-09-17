@@ -7,19 +7,23 @@ import { authenticate, optionalAuth } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Get support requests by requester ID
+// Get support requests by requester ID (or current user if no requesterId provided)
 router.get('/', authenticate, async (req, res) => {
   try {
     const { requesterId } = req.query;
     
-    if (!requesterId) {
-      return res.status(400).json({ message: 'requesterId query parameter is required' });
-    }
+    // Use provided requesterId or default to current user's ID
+    const targetRequesterId = requesterId || req.user._id;
 
-    const supportRequests = await SupportRequest.find({ requesterId })
+    console.log('Fetching support requests for user:', targetRequesterId);
+    console.log('Current authenticated user:', req.user._id);
+
+    const supportRequests = await SupportRequest.find({ requesterId: targetRequesterId })
       .populate('requesterId', 'firstName lastName email avatarUrl coverPhotoUrl')
       .populate('projectId', 'name')
       .sort({ createdAt: -1 });
+
+    console.log('Found support requests:', supportRequests.length);
 
     res.json(supportRequests);
   } catch (error) {
@@ -427,7 +431,47 @@ router.put('/payments/:reference/status', [
           payment.supportRequestId,
           { $inc: { amountRaised: payment.amount } },
           { new: true }
-        ).populate('projectId');
+        ).populate('projectId').populate('requesterId');
+
+        // Credit the user's wallet and create transaction record
+        if (supportRequest && supportRequest.requesterId) {
+          const Wallet = (await import('../models/Wallet.js')).default;
+          const Transaction = (await import('../models/Transaction.js')).default;
+          
+          // Get or create user's wallet (project-specific if linked to project)
+          let wallet = await Wallet.findOne({
+            userId: supportRequest.requesterId._id,
+            projectId: supportRequest.projectId ? supportRequest.projectId._id : null
+          });
+
+          if (!wallet) {
+            wallet = new Wallet({
+              userId: supportRequest.requesterId._id,
+              projectId: supportRequest.projectId ? supportRequest.projectId._id : null,
+              balance: 0,
+              currency: 'NGN'
+            });
+          }
+
+          // Credit the wallet
+          wallet.balance += payment.amount;
+          await wallet.save();
+
+          // Create transaction record
+          const transaction = new Transaction({
+            userId: supportRequest.requesterId._id,
+            type: 'credit',
+            amount: payment.amount,
+            description: `Support payment received for "${supportRequest.title}"`,
+            reference: payment.reference || `SUP_${Date.now()}`,
+            status: 'completed',
+            projectId: supportRequest.projectId ? supportRequest.projectId._id : null,
+            paystackReference: payment.paystackReference
+          });
+          await transaction.save();
+
+          console.log('Wallet credited:', wallet.balance, 'Transaction created:', transaction._id);
+        }
 
         // Update associated project funding if linked to a project
         if (supportRequest && supportRequest.projectId) {

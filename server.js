@@ -27,6 +27,7 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+
 // Security middleware
 app.use(helmet());
 app.use(compression());
@@ -35,7 +36,11 @@ app.use(compression());
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100,
-  message: 'Too many requests from this IP, please try again later.'
+  message: 'Too many requests from this IP, please try again later.',
+  // Ensure CORS preflight requests are never rate-limited
+  skip: (req) => req.method === 'OPTIONS',
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 app.use(limiter);
 
@@ -45,6 +50,10 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5173',
   'http://localhost:4173',
+  'http://127.0.0.1:8080',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:4173',
   'https://apparcus.com',
   'https://www.apparcus.com',
   'https://api.apparcus.com',
@@ -56,22 +65,35 @@ const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like curl or mobile apps)
     if (!origin) return callback(null, true);
+    
+    // In development, be more permissive
+    if (process.env.NODE_ENV !== 'production') {
+      // Allow localhost and 127.0.0.1 on any port in development
+      if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+        return callback(null, true);
+      }
+    }
+    
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     } else {
+      console.warn('CORS blocked origin:', origin);
       return callback(new Error('CORS not allowed from this origin: ' + origin), false);
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-  optionsSuccessStatus: 200
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  optionsSuccessStatus: 200,
+  preflightContinue: false
 };
 
 app.use(cors(corsOptions));
 
 // ✅ Handle preflight (OPTIONS) requests for all routes
 app.options('*', cors(corsOptions));
+
+
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));

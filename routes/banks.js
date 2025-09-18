@@ -76,12 +76,12 @@ router.post('/verify-account', authenticate, async (req, res) => {
       });
     }
 
-    // Mock verification - in production this would call Paystack API
-    const bank = NIGERIAN_BANKS.find(b => b.code === bank_code);
-    if (!bank) {
-      return res.status(400).json({
+    const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
+    if (!paystackSecretKey) {
+      return res.status(500).json({
         status: false,
-        message: 'Invalid bank code',
+        message: 'Bank verification service not configured',
+        error: 'Missing Paystack API key',
         data: {
           account_number: '',
           account_name: '',
@@ -90,13 +90,37 @@ router.post('/verify-account', authenticate, async (req, res) => {
       });
     }
 
-    // Mock account verification response
+    // Call Paystack API for real bank account verification
+    const paystackResponse = await fetch(`https://api.paystack.co/bank/resolve?account_number=${account_number}&bank_code=${bank_code}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${paystackSecretKey}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const verificationData = await paystackResponse.json();
+
+    if (!paystackResponse.ok || !verificationData.status) {
+      console.error('Paystack verification failed:', verificationData);
+      return res.status(400).json({
+        status: false,
+        message: verificationData.message || 'Bank account verification failed',
+        data: {
+          account_number: '',
+          account_name: '',
+          bank_id: 0
+        }
+      });
+    }
+
+    // Return successful verification data
     res.json({
       status: true,
       message: 'Account verification successful',
       data: {
-        account_number: account_number,
-        account_name: 'John Doe', // Mock name
+        account_number: verificationData.data.account_number,
+        account_name: verificationData.data.account_name,
         bank_id: parseInt(bank_code)
       }
     });

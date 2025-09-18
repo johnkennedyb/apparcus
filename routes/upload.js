@@ -53,8 +53,9 @@ router.post('/single', authenticate, upload.single('file'), async (req, res) => 
       return res.status(400).json({ message: 'No file uploaded' });
     }
 
-    // Generate URL for the uploaded file
-    const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+    // Generate URL for the uploaded file using environment variable or fallback
+    const baseUrl = process.env.API_BASE_URL || process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`;
+    const fileUrl = `${baseUrl}/uploads/${req.file.filename}`;
     
     res.json({
       message: 'File uploaded successfully',
@@ -77,8 +78,9 @@ router.post('/multiple', authenticate, upload.array('files', 5), async (req, res
       return res.status(400).json({ message: 'No files uploaded' });
     }
 
+    const baseUrl = process.env.API_BASE_URL || process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`;
     const results = req.files.map(file => {
-      const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${file.filename}`;
+      const fileUrl = `${baseUrl}/uploads/${file.filename}`;
       return {
         url: fileUrl,
         publicId: file.filename,
@@ -105,8 +107,9 @@ router.post('/profile-picture', authenticate, upload.single('profilePicture'), a
       return res.status(400).json({ message: 'No profile picture uploaded' });
     }
 
-    // Generate URL for the uploaded file
-    const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+    // Generate URL for the uploaded file using environment variable or fallback
+    const baseUrl = process.env.API_BASE_URL || process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`;
+    const fileUrl = `${baseUrl}/uploads/${req.file.filename}`;
     
     // Update user's avatar URL
     const user = await User.findByIdAndUpdate(
@@ -145,8 +148,9 @@ router.post('/cover-photo', authenticate, upload.single('coverPhoto'), async (re
       return res.status(400).json({ message: 'No cover photo uploaded' });
     }
 
-    // Generate URL for the uploaded file
-    const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+    // Generate URL for the uploaded file using environment variable or fallback
+    const baseUrl = process.env.API_BASE_URL || process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`;
+    const fileUrl = `${baseUrl}/uploads/${req.file.filename}`;
     
     // Update user's cover photo URL
     const user = await User.findByIdAndUpdate(

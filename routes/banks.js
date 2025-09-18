@@ -59,7 +59,7 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
-// Verify bank account
+// Verify bank account (accessible via both /banks/verify-account and /verify-account)
 router.post('/verify-account', authenticate, async (req, res) => {
   try {
     const { account_number, bank_code } = req.body;

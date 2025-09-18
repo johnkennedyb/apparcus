@@ -1,7 +1,11 @@
 import express from 'express';
 import { body, validationResult } from 'express-validator';
 import Wallet from '../models/Wallet.js';
+import TransferRecipient from '../models/TransferRecipient.js';
 import { authenticate } from '../middleware/auth.js';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const router = express.Router();
 
@@ -152,6 +156,7 @@ router.post('/withdraw', authenticate, [
     }
 
     const { amount, bankCode, accountNumber, accountName } = req.body;
+    const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
 
     // Get user's main wallet
     const wallet = await Wallet.findOne({
@@ -167,7 +172,97 @@ router.post('/withdraw', authenticate, [
       return res.status(400).json({ message: 'Insufficient balance' });
     }
 
-    // Deduct amount from wallet
+    // Convert amount to kobo for Paystack
+    const amountInKobo = Math.round(amount * 100);
+    const reference = `WD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    let transferRecipient;
+    let transferResponse;
+
+    // If Paystack is configured, create real transfer
+    if (paystackSecretKey) {
+      try {
+        // Check if we have a cached recipient for this bank account
+        transferRecipient = await TransferRecipient.findOne({
+          userId: req.user._id,
+          accountNumber,
+          bankCode,
+          isActive: true
+        });
+
+        // Create recipient if not exists
+        if (!transferRecipient) {
+          console.log('Creating new transfer recipient for user:', req.user._id);
+          const recipientResponse = await fetch('https://api.paystack.co/transferrecipient', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${paystackSecretKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              type: 'nuban',
+              name: accountName,
+              account_number: accountNumber,
+              bank_code: bankCode,
+              currency: 'NGN'
+            })
+          });
+
+          const recipientData = await recipientResponse.json();
+
+          if (!recipientResponse.ok || !recipientData.status) {
+            throw new Error(recipientData.message || 'Failed to create transfer recipient');
+          }
+
+          // Save recipient to database
+          transferRecipient = new TransferRecipient({
+            userId: req.user._id,
+            recipientCode: recipientData.data.recipient_code,
+            accountNumber,
+            accountName,
+            bankCode,
+            bankName: recipientData.data.details?.bank_name || 'Unknown Bank',
+            paystackData: recipientData.data
+          });
+          await transferRecipient.save();
+          console.log('Transfer recipient created:', transferRecipient.recipientCode);
+        }
+
+        // Initiate transfer
+        console.log('Initiating Paystack transfer:', reference, amountInKobo);
+        const transferResponseRaw = await fetch('https://api.paystack.co/transfer', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${paystackSecretKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            source: 'balance',
+            amount: amountInKobo,
+            recipient: transferRecipient.recipientCode,
+            reason: `Withdrawal by ${req.user.firstName} ${req.user.lastName}`,
+            reference: reference
+          })
+        });
+
+        transferResponse = await transferResponseRaw.json();
+
+        if (!transferResponseRaw.ok || !transferResponse.status) {
+          throw new Error(transferResponse.message || 'Failed to initiate transfer');
+        }
+
+        console.log('Paystack transfer initiated successfully:', transferResponse.data.transfer_code);
+
+      } catch (paystackError) {
+        console.error('Paystack transfer failed:', paystackError.message);
+        return res.status(400).json({ 
+          message: `Transfer failed: ${paystackError.message}`,
+          error: paystackError.message
+        });
+      }
+    }
+
+    // Deduct amount from wallet (for both real and mock transfers)
     wallet.balance -= amount;
     await wallet.save();
 
@@ -178,25 +273,37 @@ router.post('/withdraw', authenticate, [
       type: 'debit',
       amount: amount,
       description: `Withdrawal to ${accountName} - ${accountNumber}`,
-      status: 'completed',
-      reference: `WD_${Date.now()}`,
+      status: paystackSecretKey && transferResponse ? 'pending' : 'completed', // Pending for real transfers, completed for mock
+      reference: reference,
+      paystackReference: transferResponse?.data?.transfer_code || null,
       metadata: {
         bankCode,
         accountNumber,
         accountName,
-        withdrawalType: 'bank_transfer'
+        withdrawalType: 'bank_transfer',
+        transferRecipientId: transferRecipient?._id || null,
+        paystackTransferCode: transferResponse?.data?.transfer_code || null,
+        isRealTransfer: !!paystackSecretKey
       }
     });
     await transaction.save();
 
+    const responseMessage = paystackSecretKey 
+      ? 'Withdrawal initiated successfully. Transfer is being processed.'
+      : 'Withdrawal successful (mock transfer)';
+
+    console.log('Withdrawal transaction created:', transaction._id, 'Status:', transaction.status);
+
     res.json({
-      message: 'Withdrawal successful',
+      message: responseMessage,
       transaction,
-      newBalance: wallet.balance
+      newBalance: wallet.balance,
+      transferCode: transferResponse?.data?.transfer_code || null,
+      isRealTransfer: !!paystackSecretKey
     });
   } catch (error) {
     console.error('Withdraw error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 

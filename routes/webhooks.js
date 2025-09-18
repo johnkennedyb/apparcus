@@ -138,11 +138,32 @@ async function handleFailedPayment(data) {
 // Handle successful transfer (for payouts)
 async function handleSuccessfulTransfer(data) {
   try {
-    const { reference, amount, recipient } = data;
-    console.log('Transfer successful:', reference, amount);
+    const { reference, amount, recipient, transfer_code } = data;
+    console.log('Transfer successful:', reference, amount, transfer_code);
     
-    // Add logic for handling successful transfers/payouts
-    // This could update user wallet balances, transaction records, etc.
+    // Find the transaction record by reference or transfer_code
+    const Transaction = (await import('../models/Transaction.js')).default;
+    const transaction = await Transaction.findOne({
+      $or: [
+        { reference: reference },
+        { paystackReference: transfer_code }
+      ]
+    });
+    
+    if (transaction) {
+      // Update transaction status to completed
+      transaction.status = 'completed';
+      transaction.metadata = {
+        ...transaction.metadata,
+        completedAt: new Date(),
+        paystackTransferData: data
+      };
+      await transaction.save();
+      
+      console.log('Transfer transaction marked as completed:', transaction._id);
+    } else {
+      console.warn('Transaction not found for successful transfer:', reference, transfer_code);
+    }
     
   } catch (error) {
     console.error('Error handling successful transfer:', error);
@@ -153,11 +174,45 @@ async function handleSuccessfulTransfer(data) {
 // Handle failed transfer
 async function handleFailedTransfer(data) {
   try {
-    const { reference, amount, recipient } = data;
-    console.log('Transfer failed:', reference, amount);
+    const { reference, amount, recipient, transfer_code } = data;
+    console.log('Transfer failed:', reference, amount, transfer_code);
     
-    // Add logic for handling failed transfers
-    // This could notify users, retry transfers, etc.
+    // Find the transaction record by reference or transfer_code
+    const Transaction = (await import('../models/Transaction.js')).default;
+    const transaction = await Transaction.findOne({
+      $or: [
+        { reference: reference },
+        { paystackReference: transfer_code }
+      ]
+    });
+    
+    if (transaction) {
+      // Update transaction status to failed
+      transaction.status = 'failed';
+      transaction.metadata = {
+        ...transaction.metadata,
+        failedAt: new Date(),
+        paystackTransferData: data
+      };
+      await transaction.save();
+      
+      // Credit the wallet back since the transfer failed
+      const Wallet = (await import('../models/Wallet.js')).default;
+      const wallet = await Wallet.findOne({
+        userId: transaction.userId,
+        projectId: null // Main wallet
+      });
+      
+      if (wallet) {
+        wallet.balance += transaction.amount; // Credit back the amount
+        await wallet.save();
+        console.log('Wallet credited back due to failed transfer:', wallet._id, 'Amount:', transaction.amount);
+      }
+      
+      console.log('Transfer transaction marked as failed and wallet credited back:', transaction._id);
+    } else {
+      console.warn('Transaction not found for failed transfer:', reference, transfer_code);
+    }
     
   } catch (error) {
     console.error('Error handling failed transfer:', error);

@@ -292,14 +292,6 @@ router.get('/requests/:id/payments', async (req, res) => {
     .skip((page - 1) * limit)
     .sort({ createdAt: -1 });
 
-    // Debug: Log payment data being returned
-    console.log('Fetching payments for support request:', req.params.id);
-    console.log('Found payments with custom data:', payments.map(p => ({
-      donorName: p.donorName,
-      customData: p.customData,
-      hasCustomData: !!p.customData && Object.keys(p.customData).length > 0,
-      customDataKeys: p.customData ? Object.keys(p.customData) : []
-    })));
 
     const total = await SupportPayment.countDocuments({ 
       supportRequestId: req.params.id,
@@ -333,16 +325,6 @@ router.post('/requests/:id/payments', [
 
     const { donorName, donorEmail, amount, paystackReference, customData } = req.body;
 
-    // Debug: Log the received data
-    console.log('Creating support payment with data:', {
-      donorName,
-      donorEmail,
-      amount,
-      paystackReference,
-      customData,
-      customDataKeys: customData ? Object.keys(customData) : [],
-      hasCustomData: !!customData && Object.keys(customData).length > 0
-    });
 
     // Check if support request exists
     const supportRequest = await SupportRequest.findById(req.params.id);

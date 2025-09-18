@@ -40,8 +40,8 @@ const supportRequestSchema = new mongoose.Schema({
     default: 'active'
   },
   customColumns: {
-    type: mongoose.Schema.Types.Mixed,
-    default: {}
+    type: [String],
+    default: []
   }
 }, {
   timestamps: true

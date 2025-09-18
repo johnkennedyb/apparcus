@@ -2,9 +2,9 @@ import { v2 as cloudinary } from 'cloudinary';
 
 // Configure Cloudinary with your credentials
 cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'apparcus',
-  api_key: process.env.CLOUDINARY_API_KEY || '268257791245894',
-  api_secret: process.env.CLOUDINARY_API_SECRET || 'ROm5579w6IkDwqLtJH4XkfftOyQ'
+  cloud_name:'dw7w2at8k', // You'll need to provide the correct cloud name
+  api_key: '268257791245894',
+  api_secret: 'Zw3fw4RaORLS4f9HldknHfqb7yE'
 });
 
 export default cloudinary;

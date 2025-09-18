@@ -16,6 +16,7 @@ import supportRoutes from './routes/support.js';
 import transactionRoutes from './routes/transactions.js';
 import walletRoutes from './routes/wallets.js';
 import uploadRoutes from './routes/upload.js';
+import cloudinaryUploadRoutes from './routes/cloudinary-upload.js';
 import emailRoutes from './routes/email.js';
 import bankRoutes from './routes/banks.js';
 import paymentRoutes from './routes/payments.js';
@@ -120,6 +121,7 @@ app.use('/api/support', supportRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/wallets', walletRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/cloudinary-upload', cloudinaryUploadRoutes);
 
 // Serve uploaded files statically with proper headers
 app.use('/uploads', (req, res, next) => {

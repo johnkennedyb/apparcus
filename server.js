@@ -132,9 +132,15 @@ app.use('/uploads', (req, res, next) => {
 
 app.use('/api/email', emailRoutes);
 app.use('/api/banks', bankRoutes);
-app.use('/api/verify-account', bankRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/webhooks', webhookRoutes);
+
+// Direct route for bank account verification (for backward compatibility)
+app.use('/api/verify-account', (req, res, next) => {
+  // Forward to banks route with verify-account path
+  req.url = '/verify-account';
+  bankRoutes(req, res, next);
+});
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
